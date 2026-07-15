@@ -1,0 +1,8 @@
+[package]
+name = "light-manager"
+version = "0.1.0"
+edition = "2024"
+description = "用于tcp模式的流水线信号灯管理"
+repository = "https://github.com/zy97/light-manager"
+
+[dependencies]
