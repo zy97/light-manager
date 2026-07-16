@@ -6,3 +6,31 @@ description = "用于tcp模式的流水线信号灯管理"
 repository = "https://github.com/zy97/light-manager"
 
 [dependencies]
+config = { version = "0.15.22", features = ["toml"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tracing = { version = "0.1.44", features = ["std"] }
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = [
+    "registry",
+    "std",
+    "env-filter",
+] }
+tokio = { version = "1.52.3", features = ["full"] }
+deadpool = { version = "0.13.0", default-features = false, features = [
+    "managed",
+] }
+reqwest = { version = "0.13.3", features = ["json"] }
+
+# OpenTelemetry — traces + logs via OTLP gRPC
+opentelemetry = { version = "0.31", features = ["trace"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = [
+    "grpc-tonic",
+    "logs",
+    "trace",
+] }
+opentelemetry-http = "0.31"
+tracing-opentelemetry = { version = "0.32", default-features = false }
+opentelemetry-appender-tracing = { version = "0.31", features = [
+    "experimental_use_tracing_span_context",
+] }
