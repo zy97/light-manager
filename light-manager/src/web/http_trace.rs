@@ -7,7 +7,12 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use opentelemetry::{Context, global, trace::TraceContextExt};
+use opentelemetry::{
+    Context, KeyValue,
+    baggage::BaggageExt,
+    global,
+    trace::{Status, TraceContextExt},
+};
 use opentelemetry_http::HeaderExtractor;
 use std::time::Instant;
 use tracing::{Instrument, error, field, info, info_span};
@@ -31,12 +36,14 @@ pub async fn trace_http_request(request: Request, next: Next) -> Response {
         contenttype = %request_info.content_type,
         contentlength = request_info.content_length,
     );
-    let _ = span.set_parent(parent_context);
+    let _ = span.set_parent(parent_context.clone());
+    record_baggage_attributes(&span, &parent_context);
 
     let trace_id = parent_trace_id.unwrap_or_else(|| {
         trace_id_from_context(&span.context()).unwrap_or_else(|| "unknown".to_string())
     });
     span.record("trace_id", field::display(&trace_id));
+    let request_span = span.clone();
 
     async move {
         let started_at = Instant::now();
@@ -63,6 +70,11 @@ pub async fn trace_http_request(request: Request, next: Next) -> Response {
         let body_bytes = match to_bytes(body, usize::MAX).await {
             Ok(bytes) => bytes,
             Err(err) => {
+                record_exception(
+                    &request_span,
+                    "http.response_body_read_error",
+                    err.to_string(),
+                );
                 error!(
                     trace_id = %trace_id,
                     error = ?err,
@@ -103,6 +115,10 @@ pub async fn trace_http_request(request: Request, next: Next) -> Response {
             "{}",
             response_info.finish_message(&request_info, status_code)
         );
+
+        if is_server_error(status_code) {
+            record_http_error_status(&request_span, status_code);
+        }
 
         Response::from_parts(parts, Body::from(body_bytes))
     }
@@ -233,6 +249,45 @@ fn extract_trace_context(headers: &HeaderMap) -> Context {
     global::get_text_map_propagator(|propagator| propagator.extract(&HeaderExtractor(headers)))
 }
 
+fn record_baggage_attributes(span: &tracing::Span, context: &Context) {
+    for (key, (value, _metadata)) in context.baggage().iter() {
+        span.set_attribute(
+            format!("baggage.{}", key.as_str()),
+            value.as_str().to_string(),
+        );
+    }
+}
+
+fn is_server_error(status_code: u16) -> bool {
+    status_code >= 500
+}
+
+fn record_http_error_status(span: &tracing::Span, status_code: u16) {
+    let description = http_error_status_description(status_code);
+    span.set_status(Status::error(description.clone()));
+    span.set_attribute("error.type", "http.server_error");
+    span.set_attribute("http.response.status_code", i64::from(status_code));
+    span.set_attribute("error.message", description);
+}
+
+fn record_exception(span: &tracing::Span, exception_type: &'static str, message: String) {
+    span.set_status(Status::error(message.clone()));
+    span.set_attribute("error.type", exception_type);
+    span.set_attribute("exception.type", exception_type);
+    span.set_attribute("exception.message", message.clone());
+    span.add_event(
+        "exception",
+        vec![
+            KeyValue::new("exception.type", exception_type),
+            KeyValue::new("exception.message", message),
+        ],
+    );
+}
+
+fn http_error_status_description(status_code: u16) -> String {
+    format!("HTTP response completed with status code {status_code}")
+}
+
 fn trace_id_from_context(context: &Context) -> Option<String> {
     let span_context = context.span().span_context().clone();
 
@@ -245,7 +300,10 @@ fn trace_id_from_context(context: &Context) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HttpRequestLogInfo, HttpResponseLogInfo, trace_id_from_context};
+    use super::{
+        HttpRequestLogInfo, HttpResponseLogInfo, http_error_status_description, is_server_error,
+        trace_id_from_context,
+    };
     use axum::body::Body;
     use axum::http::{HeaderMap, HeaderValue, Request};
     use opentelemetry::propagation::TextMapPropagator;
@@ -324,6 +382,22 @@ mod tests {
         assert_eq!(
             response_info.finish_message(&request_info, 200),
             "Request finished HTTP/1.1 POST http://10.11.60.143:9001/User/Login?source=scanner - 200 52 application/json 5ms"
+        );
+    }
+
+    #[test]
+    fn classifies_only_5xx_status_codes_as_span_errors() {
+        assert!(!is_server_error(400));
+        assert!(!is_server_error(499));
+        assert!(is_server_error(500));
+        assert!(is_server_error(502));
+    }
+
+    #[test]
+    fn renders_http_error_status_description() {
+        assert_eq!(
+            http_error_status_description(500),
+            "HTTP response completed with status code 500"
         );
     }
 }
