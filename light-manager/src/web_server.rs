@@ -1,15 +1,20 @@
 use crate::light_runtime::{LightError, LightService, LightStatus};
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, State},
+    extract::{ConnectInfo, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use opentelemetry::{Context, global, trace::TraceContextExt};
+use opentelemetry_http::HeaderExtractor;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, signal};
-use tracing::{error, info};
+use tracing::{Instrument, error, field, info, info_span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -44,6 +49,7 @@ pub fn build_router(light_service: Arc<LightService>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/lights/control", post(control_light))
+        .layer(middleware::from_fn(trace_http_request))
         .with_state(AppState { light_service })
 }
 
@@ -71,6 +77,59 @@ async fn health() -> Json<ApiResponse<&'static str>> {
         data: Some("ok"),
         message: "ok".to_string(),
     })
+}
+
+async fn trace_http_request(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let parent_context = extract_trace_context(request.headers());
+    let parent_trace_id = trace_id_from_context(&parent_context);
+    let span = info_span!(
+        "http_request",
+        trace_id = field::Empty,
+        method = %method,
+        uri = %uri,
+    );
+    let _ = span.set_parent(parent_context);
+
+    let trace_id = parent_trace_id.unwrap_or_else(|| {
+        trace_id_from_context(&span.context()).unwrap_or_else(|| "unknown".to_string())
+    });
+    span.record("trace_id", field::display(&trace_id));
+
+    async move {
+        let started_at = Instant::now();
+        info!(trace_id = %trace_id, "http request started");
+
+        let response = next.run(request).await;
+        let status = response.status();
+        let elapsed_ms = started_at.elapsed().as_millis();
+
+        info!(
+            trace_id = %trace_id,
+            status = status.as_u16(),
+            elapsed_ms,
+            "http request finished"
+        );
+
+        response
+    }
+    .instrument(span)
+    .await
+}
+
+fn extract_trace_context(headers: &axum::http::HeaderMap) -> Context {
+    global::get_text_map_propagator(|propagator| propagator.extract(&HeaderExtractor(headers)))
+}
+
+fn trace_id_from_context(context: &Context) -> Option<String> {
+    let span_context = context.span().span_context().clone();
+
+    if span_context.is_valid() {
+        Some(span_context.trace_id().to_string())
+    } else {
+        None
+    }
 }
 
 async fn control_light(
@@ -158,7 +217,11 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{LightTarget, resolve_target};
+    use super::{LightTarget, resolve_target, trace_id_from_context};
+    use axum::http::{HeaderMap, HeaderValue};
+    use opentelemetry::propagation::TextMapPropagator;
+    use opentelemetry_http::HeaderExtractor;
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
     use std::net::SocketAddr;
 
     #[test]
@@ -187,5 +250,21 @@ mod tests {
             target,
             LightTarget::RequestIp(ip) if ip == "127.0.0.1"
         ));
+    }
+
+    #[test]
+    fn reads_trace_id_from_traceparent_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+        );
+        let propagator = TraceContextPropagator::new();
+        let context = propagator.extract(&HeaderExtractor(&headers));
+
+        assert_eq!(
+            trace_id_from_context(&context),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736".to_string())
+        );
     }
 }

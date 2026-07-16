@@ -16,7 +16,7 @@ pub struct ServerConfig {
     pub listen_addr: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 pub struct Light {
     pub address: String,
     #[serde(default)]

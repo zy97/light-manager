@@ -6,8 +6,8 @@ description = "用于tcp模式的流水线信号灯管理"
 repository = "https://github.com/zy97/light-manager"
 
 [dependencies]
-axum = { version = "0.8.4", features = ["json", "tokio"] }
-config = { version = "0.15.22", features = ["toml"] }
+axum = { version = "0.8.9", features = ["json", "tokio"] }
+config = { version = "0.15.25", features = ["toml"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tracing = { version = "0.1.44", features = ["std"] }
 tracing-appender = "0.2.5"
@@ -20,18 +20,16 @@ tokio = { version = "1.52.3", features = ["full"] }
 deadpool = { version = "0.13.0", default-features = false, features = [
     "managed",
 ] }
-reqwest = { version = "0.13.3", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json"] }
 
 # OpenTelemetry — traces + logs via OTLP gRPC
-opentelemetry = { version = "0.31", features = ["trace"] }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = [
+opentelemetry = { version = "0.32", features = ["trace"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = [
     "grpc-tonic",
     "logs",
     "trace",
 ] }
-opentelemetry-http = "0.31"
-tracing-opentelemetry = { version = "0.32", default-features = false }
-opentelemetry-appender-tracing = { version = "0.31", features = [
-    "experimental_use_tracing_span_context",
-] }
+opentelemetry-http = "0.32"
+tracing-opentelemetry = { version = "0.33", default-features = false }
+opentelemetry-appender-tracing = { version = "0.32", features = [] }

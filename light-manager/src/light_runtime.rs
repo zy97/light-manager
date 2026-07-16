@@ -29,6 +29,7 @@ pub struct LightRuntime {
 }
 
 pub struct LightService {
+    lights: Vec<Light>,
     runtimes: HashMap<String, LightRuntime>,
     request_ip_map: HashMap<String, Vec<String>>,
     protocol: LightProtocol,
@@ -73,6 +74,7 @@ impl LightService {
             .collect();
 
         Self {
+            lights: config.lights.clone(),
             runtimes,
             request_ip_map: config.request_ip_map(),
             protocol: LightProtocol::from_config(&config.commands)
@@ -396,11 +398,7 @@ pub async fn wait_for_shutdown(service: &LightService) {
 }
 
 pub fn log_startup(service: &LightService) {
-    info!(
-        light_count = service.configured_light_count(),
-        mapped_request_ip_count = service.request_ip_map.len(),
-        "light manager started"
-    );
+    info!(lights = ?service.lights, "light manager started");
 
     if service.configured_light_count() == 0 {
         warn!("未配置固定灯控设备，仍可通过传入灯 IP 动态发送命令");
@@ -500,6 +498,27 @@ mod tests {
             service.request_ip_map.get("::1"),
             Some(&vec!["192.168.70.151:502".to_string()])
         );
+    }
+
+    #[test]
+    fn startup_log_data_includes_lights() {
+        let config = LightConfig {
+            lights: vec![
+                Light {
+                    address: "192.168.70.153:502".to_string(),
+                    request_ips: vec!["192.168.70.166".to_string()],
+                },
+                Light {
+                    address: "192.168.70.151:502".to_string(),
+                    request_ips: vec!["::1".to_string(), "192.168.70.166".to_string()],
+                },
+            ],
+            commands: LightCommandConfig::default(),
+        };
+
+        let service = LightService::new(&config);
+
+        assert_eq!(service.lights, config.lights);
     }
 
     #[tokio::test]
