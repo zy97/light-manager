@@ -2,7 +2,8 @@ use crate::{
     app_config::{APP_CONFIG, Light, LightConfig},
     tcp_manager::{Pool, TcpManager},
 };
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     signal,
@@ -21,7 +22,8 @@ const RED_FLASH_ON_DELAY: Duration = Duration::from_millis(500);
 const RED_FLASH_OFF_DELAY: Duration = Duration::from_millis(200);
 const RED_FLASH_TIMES: usize = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LightStatus {
     Red,
     Green,
@@ -30,15 +32,13 @@ pub enum LightStatus {
 
 #[derive(Clone)]
 pub struct LightRuntime {
-    pub name: String,
     pub address: String,
     pub pool: Pool,
 }
 
 pub struct LightService {
     runtimes: HashMap<String, LightRuntime>,
-    request_ip_map: HashMap<String, String>,
-    port: u16,
+    request_ip_map: HashMap<String, Vec<String>>,
 }
 
 pub fn build_light_service() -> LightService {
@@ -47,12 +47,11 @@ pub fn build_light_service() -> LightService {
 
 impl LightService {
     pub fn new(config: &LightConfig) -> Self {
-        let port = config.port();
         let runtimes = config
             .lights
             .iter()
             .map(|light| {
-                let runtime = build_light_runtime(light, port);
+                let runtime = build_light_runtime(light);
                 (runtime.address.clone(), runtime)
             })
             .collect();
@@ -60,7 +59,6 @@ impl LightService {
         Self {
             runtimes,
             request_ip_map: config.request_ip_map(),
-            port,
         }
     }
 
@@ -69,22 +67,21 @@ impl LightService {
         status: LightStatus,
         request_ip: &str,
     ) -> Result<(), LightError> {
-        let light_ip = self
+        let light_addresses = self
             .request_ip_map
             .get(request_ip)
             .ok_or_else(|| LightError::UnknownRequestIp(request_ip.to_string()))?;
 
-        self.light(status, light_ip).await
+        self.light(status, &light_addresses[0]).await
     }
 
     pub async fn light(&self, status: LightStatus, light_ip: &str) -> Result<(), LightError> {
-        let address = normalize_light_address(light_ip, self.port);
+        let address = light_ip.to_string();
 
         if let Some(runtime) = self.runtimes.get(&address) {
             send_status(runtime, status).await
         } else {
             let runtime = LightRuntime {
-                name: light_ip.to_string(),
                 address: address.clone(),
                 pool: build_light_pool(&address),
             };
@@ -93,22 +90,27 @@ impl LightService {
     }
 
     pub async fn red_status_by_request_ip(&self, request_ip: &str) -> Result<bool, LightError> {
-        let light_ip = self
+        let light_addresses = self
             .request_ip_map
             .get(request_ip)
             .ok_or_else(|| LightError::UnknownRequestIp(request_ip.to_string()))?;
 
-        self.red_status(light_ip).await
+        if light_addresses.len() != 1 {
+            return Err(LightError::MultipleLightsForRequestIp(
+                request_ip.to_string(),
+            ));
+        }
+
+        self.red_status(&light_addresses[0]).await
     }
 
     pub async fn red_status(&self, light_ip: &str) -> Result<bool, LightError> {
-        let address = normalize_light_address(light_ip, self.port);
+        let address = light_ip.to_string();
 
         if let Some(runtime) = self.runtimes.get(&address) {
             read_red_status(runtime).await
         } else {
             let runtime = LightRuntime {
-                name: light_ip.to_string(),
                 address: address.clone(),
                 pool: build_light_pool(&address),
             };
@@ -121,10 +123,9 @@ impl LightService {
     }
 }
 
-fn build_light_runtime(light: &Light, port: u16) -> LightRuntime {
-    let address = normalize_light_address(&light.address, port);
+fn build_light_runtime(light: &Light) -> LightRuntime {
+    let address = light.address.clone();
     LightRuntime {
-        name: light.name.clone(),
         pool: build_light_pool(&address),
         address,
     }
@@ -178,9 +179,8 @@ async fn send(runtime: &LightRuntime, command: &[u8]) -> Result<(), LightError> 
         .map_err(|err| LightError::ConnectionPool(runtime.address.clone(), err.to_string()))?;
 
     debug!(
-        light_name = %runtime.name,
         light_addr = %runtime.address,
-        command = ?command,
+        command = %format_command(command),
         "sending light command"
     );
 
@@ -192,9 +192,8 @@ async fn send(runtime: &LightRuntime, command: &[u8]) -> Result<(), LightError> 
             }
 
             info!(
-                light_name = %runtime.name,
                 light_addr = %runtime.address,
-                command = ?command,
+                command = %format_command(command),
                 "light command sent"
             );
             Ok(())
@@ -237,12 +236,12 @@ async fn read_red_status(runtime: &LightRuntime) -> Result<bool, LightError> {
     Ok(read_len > 3 && buffer[3] == 15)
 }
 
-fn normalize_light_address(address: &str, default_port: u16) -> String {
-    if address.parse::<SocketAddr>().is_ok() {
-        address.to_string()
-    } else {
-        format!("{address}:{default_port}")
-    }
+fn format_command(command: &[u8]) -> String {
+    command
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub async fn wait_for_shutdown(service: &LightService) {
@@ -254,7 +253,7 @@ pub async fn wait_for_shutdown(service: &LightService) {
             );
             for runtime in service.runtimes.values() {
                 runtime.pool.close();
-                info!("{}:{}已关闭", runtime.name, runtime.address);
+                info!("{}已关闭", runtime.address);
             }
             info!(
                 light_count = service.configured_light_count(),
@@ -282,6 +281,7 @@ pub fn log_startup(service: &LightService) {
 #[derive(Debug)]
 pub enum LightError {
     UnknownRequestIp(String),
+    MultipleLightsForRequestIp(String),
     ConnectionPool(String, String),
     Io(String, std::io::Error),
     Timeout(String),
@@ -291,6 +291,12 @@ impl std::fmt::Display for LightError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LightError::UnknownRequestIp(ip) => write!(f, "unknown request ip: {ip}"),
+            LightError::MultipleLightsForRequestIp(ip) => {
+                write!(
+                    f,
+                    "request ip maps to multiple lights, light_ip is required: {ip}"
+                )
+            }
             LightError::ConnectionPool(addr, err) => {
                 write!(f, "failed to acquire light connection {addr}: {err}")
             }
@@ -305,10 +311,11 @@ impl std::error::Error for LightError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        GREEN_LIGHT_OFF, GREEN_LIGHT_ON, LightService, LightStatus, RED_FLASH_TIMES, RED_LIGHT_OFF,
-        RED_LIGHT_ON, build_light_runtime, normalize_light_address, read_red_status, send_status,
+        GREEN_LIGHT_OFF, GREEN_LIGHT_ON, LightRuntime, LightService, LightStatus, RED_FLASH_TIMES,
+        RED_LIGHT_OFF, RED_LIGHT_ON, build_light_pool, build_light_runtime, format_command,
+        read_red_status, send_status,
     };
-    use crate::app_config::{Light, LightConfig, RequestLightMap, default_request_light_maps};
+    use crate::app_config::{Light, LightConfig};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -316,34 +323,37 @@ mod tests {
     };
 
     #[test]
-    fn normalize_light_address_appends_default_port_when_missing() {
-        assert_eq!(
-            normalize_light_address("192.168.70.151", 502),
-            "192.168.70.151:502"
-        );
-        assert_eq!(
-            normalize_light_address("192.168.70.151:1502", 502),
-            "192.168.70.151:1502"
-        );
+    fn formats_command_as_hex_bytes() {
+        assert_eq!(format_command(GREEN_LIGHT_OFF), "01 05 00 00 FF 00 8C 3A");
     }
 
     #[test]
-    fn default_request_ip_map_matches_csharp_mapping() {
+    fn request_ip_map_matches_light_scoped_config() {
         let config = LightConfig {
-            default_port: 502,
-            lights: Vec::new(),
-            request_light_maps: default_request_light_maps(),
+            lights: vec![
+                Light {
+                    address: "192.168.70.151:502".to_string(),
+                    request_ips: vec!["::1".to_string(), "192.168.70.166".to_string()],
+                },
+                Light {
+                    address: "192.168.70.153:502".to_string(),
+                    request_ips: vec!["192.168.70.166".to_string()],
+                },
+            ],
         };
 
         let service = LightService::new(&config);
 
         assert_eq!(
-            service.request_ip_map.get("192.168.70.167"),
-            Some(&"192.168.70.153".to_string())
+            service.request_ip_map.get("192.168.70.166"),
+            Some(&vec![
+                "192.168.70.151:502".to_string(),
+                "192.168.70.153:502".to_string()
+            ])
         );
         assert_eq!(
             service.request_ip_map.get("::1"),
-            Some(&"192.168.70.151".to_string())
+            Some(&vec!["192.168.70.151:502".to_string()])
         );
     }
 
@@ -392,29 +402,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn light_by_request_ip_uses_configured_mapping() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(4);
-        tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            for _ in 0..2 {
-                let mut command = [0; 8];
-                stream.read_exact(&mut command).await.unwrap();
-                tx.send(command.to_vec()).await.unwrap();
-            }
-        });
+    async fn light_by_request_ip_uses_first_mapped_light() {
+        let (runtime_a, mut received_a) = spawn_light_server(&[&[], &[]]).await;
+        let runtime_b = LightRuntime {
+            address: "127.0.0.1:1".to_string(),
+            pool: build_light_pool("127.0.0.1:1"),
+        };
 
         let config = LightConfig {
-            default_port: 502,
-            lights: vec![Light {
-                name: "A".to_string(),
-                address: addr.to_string(),
-            }],
-            request_light_maps: vec![RequestLightMap {
-                request_ip: "127.0.0.1".to_string(),
-                light_ip: addr.to_string(),
-            }],
+            lights: vec![
+                Light {
+                    address: runtime_a.address.clone(),
+                    request_ips: vec!["127.0.0.1".to_string()],
+                },
+                Light {
+                    address: runtime_b.address.clone(),
+                    request_ips: vec!["127.0.0.1".to_string()],
+                },
+            ],
         };
         let service = LightService::new(&config);
 
@@ -423,8 +428,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(rx.recv().await.unwrap(), RED_LIGHT_OFF);
-        assert_eq!(rx.recv().await.unwrap(), GREEN_LIGHT_ON);
+        assert_eq!(received_a.recv().await.unwrap(), RED_LIGHT_OFF);
+        assert_eq!(received_a.recv().await.unwrap(), GREEN_LIGHT_ON);
     }
 
     async fn spawn_light_server(
@@ -448,10 +453,10 @@ mod tests {
         });
 
         let light = Light {
-            name: "test".to_string(),
             address: addr.to_string(),
+            request_ips: Vec::new(),
         };
 
-        (build_light_runtime(&light, 502), rx)
+        (build_light_runtime(&light), rx)
     }
 }

@@ -20,7 +20,7 @@ pub struct TelemetryGuard {
 
 pub fn init_log() -> TelemetryGuard {
     let endpoint = "http://127.0.0.1:4317";
-    let app_target = env!("CARGO_PKG_NAME");
+    let app_target = env!("CARGO_PKG_NAME").replace('-', "_");
     let resource = Resource::builder()
         .with_service_name(env!("CARGO_PKG_NAME"))
         .build();
@@ -52,30 +52,35 @@ pub fn init_log() -> TelemetryGuard {
         .with_resource(resource)
         .build();
 
+    let fmt_target = app_target.clone();
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
+        .with_writer(std::io::stdout)
+        .with_ansi(true)
         .with_filter(filter_fn(move |metadata| {
-            metadata.target().starts_with(app_target) && metadata.level() <= &Level::DEBUG
+            metadata.target().starts_with(&fmt_target) && metadata.level() <= &Level::INFO
         }));
 
     let file_appender = tracing_appender::rolling::daily("logs", "app.log");
     let (non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
+    let file_target = app_target.clone();
     let file_layer = fmt::layer()
         .with_thread_names(true)
         .with_ansi(false)
         .with_writer(non_blocking)
         .with_filter(filter_fn(move |metadata| {
-            metadata.target().starts_with(app_target) && metadata.level() <= &Level::INFO
+            metadata.target().starts_with(&file_target) && metadata.level() <= &Level::INFO
         }));
 
+    let otel_trace_target = app_target.clone();
     let otel_trace_layer = tracing_opentelemetry::layer()
         .with_tracer(tracer)
         .with_filter(filter_fn(move |metadata| {
-            metadata.target().starts_with(app_target) && metadata.level() <= &Level::DEBUG
+            metadata.target().starts_with(&otel_trace_target) && metadata.level() <= &Level::DEBUG
         }));
     let otel_log_layer =
         OpenTelemetryTracingBridge::new(&logger_provider).with_filter(filter_fn(move |metadata| {
-            metadata.target().starts_with(app_target) && metadata.level() <= &Level::DEBUG
+            metadata.target().starts_with(&app_target) && metadata.level() <= &Level::DEBUG
         }));
 
     tracing_subscriber::registry()

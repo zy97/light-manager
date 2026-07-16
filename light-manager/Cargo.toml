@@ -6,6 +6,7 @@ description = "用于tcp模式的流水线信号灯管理"
 repository = "https://github.com/zy97/light-manager"
 
 [dependencies]
+axum = { version = "0.8.4", features = ["json", "tokio"] }
 config = { version = "0.15.22", features = ["toml"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tracing = { version = "0.1.44", features = ["std"] }

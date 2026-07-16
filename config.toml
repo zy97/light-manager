@@ -1,38 +1,7 @@
+[server]
+listen_addr = "0.0.0.0:3000"
+
 [light]
-default_port = 502
-
-[[light.lights]]
-name = "light-151"
-address = "192.168.70.151"
-
-[[light.lights]]
-name = "light-153"
-address = "192.168.70.153"
-
-[[light.lights]]
-name = "light-155"
-address = "192.168.70.155"
-
-[[light.lights]]
-name = "light-157"
-address = "192.168.70.157"
-
-[[light.request_light_maps]]
-request_ip = "::1"
-light_ip = "192.168.70.151"
-
-[[light.request_light_maps]]
-request_ip = "192.168.70.166"
-light_ip = "192.168.70.151"
-
-[[light.request_light_maps]]
-request_ip = "192.168.70.167"
-light_ip = "192.168.70.153"
-
-[[light.request_light_maps]]
-request_ip = "192.168.70.168"
-light_ip = "192.168.70.155"
-
-[[light.request_light_maps]]
-request_ip = "192.168.70.169"
-light_ip = "192.168.70.157"
+lights = [
+    { address = "127.0.0.1:502", request_ips = ["127.0.0.1", "192.168.70.166"] },
+]

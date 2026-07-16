@@ -11,29 +11,28 @@ pub static APP_CONFIG: LazyLock<AppConfig> = LazyLock::new(|| {
 });
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct Light {
-    pub name: String,
-    pub address: String,
+pub struct ServerConfig {
+    #[serde(default = "default_listen_addr")]
+    pub listen_addr: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct RequestLightMap {
-    pub request_ip: String,
-    pub light_ip: String,
+pub struct Light {
+    pub address: String,
+    #[serde(default)]
+    pub request_ips: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LightConfig {
     #[serde(default)]
-    pub default_port: u16,
-    #[serde(default)]
     pub lights: Vec<Light>,
-    #[serde(default = "default_request_light_maps")]
-    pub request_light_maps: Vec<RequestLightMap>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub server: ServerConfig,
     pub light: LightConfig,
 }
 
@@ -44,51 +43,65 @@ pub fn load_config() -> Result<AppConfig, ConfigError> {
     settings.try_deserialize::<AppConfig>()
 }
 
-pub fn default_request_light_maps() -> Vec<RequestLightMap> {
-    [
-        ("::1", "192.168.70.151"),
-        ("192.168.70.166", "192.168.70.151"),
-        ("192.168.70.167", "192.168.70.153"),
-        ("192.168.70.168", "192.168.70.155"),
-        ("192.168.70.169", "192.168.70.157"),
-    ]
-    .into_iter()
-    .map(|(request_ip, light_ip)| RequestLightMap {
-        request_ip: request_ip.to_string(),
-        light_ip: light_ip.to_string(),
-    })
-    .collect()
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            listen_addr: default_listen_addr(),
+        }
+    }
+}
+
+fn default_listen_addr() -> String {
+    "0.0.0.0:3000".to_string()
 }
 
 impl LightConfig {
-    pub fn port(&self) -> u16 {
-        if self.default_port == 0 {
-            502
-        } else {
-            self.default_port
-        }
-    }
+    pub fn request_ip_map(&self) -> HashMap<String, Vec<String>> {
+        let mut map = HashMap::new();
 
-    pub fn request_ip_map(&self) -> HashMap<String, String> {
-        self.request_light_maps
-            .iter()
-            .map(|item| (item.request_ip.clone(), item.light_ip.clone()))
-            .collect()
+        for light in &self.lights {
+            for request_ip in &light.request_ips {
+                map.entry(request_ip.clone())
+                    .or_insert_with(Vec::new)
+                    .push(light.address.clone());
+            }
+        }
+
+        map
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::LightConfig;
+    use super::{Light, LightConfig};
 
     #[test]
-    fn port_defaults_to_modbus_tcp_port() {
+    fn request_ip_map_is_built_from_each_light() {
         let config = LightConfig {
-            default_port: 0,
-            lights: Vec::new(),
-            request_light_maps: Vec::new(),
+            lights: vec![
+                Light {
+                    address: "192.168.70.151:502".to_string(),
+                    request_ips: vec!["::1".to_string(), "192.168.70.166".to_string()],
+                },
+                Light {
+                    address: "192.168.70.153:502".to_string(),
+                    request_ips: vec!["192.168.70.166".to_string()],
+                },
+            ],
         };
 
-        assert_eq!(config.port(), 502);
+        let map = config.request_ip_map();
+
+        assert_eq!(
+            map.get("::1"),
+            Some(&vec!["192.168.70.151:502".to_string()])
+        );
+        assert_eq!(
+            map.get("192.168.70.166"),
+            Some(&vec![
+                "192.168.70.151:502".to_string(),
+                "192.168.70.153:502".to_string()
+            ])
+        );
     }
 }
