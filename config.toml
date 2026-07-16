@@ -1,6 +1,10 @@
 [server]
 listen_addr = "0.0.0.0:3000"
 
+[logging]
+retained_days = 30
+cleanup_interval_hours = 24
+
 [light]
 lights = [
     { address = "127.0.0.1:502", request_ips = ["127.0.0.1", "192.168.70.166"] },

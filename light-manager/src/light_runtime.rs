@@ -213,7 +213,9 @@ async fn send(
     debug!(
         light_addr = %runtime.address,
         command = %format_command(command),
-        "sending light command"
+        "正在发送灯控命令 light_addr={} command={}",
+        runtime.address,
+        format_command(command)
     );
 
     match timeout(io_timeout, connection.tcp_stream.write_all(command)).await {
@@ -226,7 +228,9 @@ async fn send(
             info!(
                 light_addr = %runtime.address,
                 command = %format_command(command),
-                "light command sent"
+                "灯控命令发送成功 light_addr={} command={}",
+                runtime.address,
+                format_command(command)
             );
             Ok(())
         }
@@ -380,25 +384,35 @@ pub async fn wait_for_shutdown(service: &LightService) {
         Ok(()) => {
             info!(
                 light_count = service.configured_light_count(),
-                "shutdown signal received, closing light pools"
+                "收到关闭信号，正在关闭灯控连接池 light_count={}",
+                service.configured_light_count()
             );
             for runtime in service.runtimes.values() {
                 runtime.pool.close();
-                info!("{}已关闭", runtime.address);
+                info!(
+                    light_addr = %runtime.address,
+                    "灯控连接池已关闭 light_addr={}",
+                    runtime.address
+                );
             }
             info!(
                 light_count = service.configured_light_count(),
-                "light manager stopped"
+                "灯控管理器已停止 light_count={}",
+                service.configured_light_count()
             );
         }
         Err(err) => {
-            eprintln!("Unable to listen for shutdown signal: {}", err);
+            eprintln!("监听关闭信号失败: {}", err);
         }
     }
 }
 
 pub fn log_startup(service: &LightService) {
-    info!(lights = ?service.lights, "light manager started");
+    info!(
+        lights = ?service.lights,
+        "灯控管理器已启动 lights={:?}",
+        service.lights
+    );
 
     if service.configured_light_count() == 0 {
         warn!("未配置固定灯控设备，仍可通过传入灯 IP 动态发送命令");

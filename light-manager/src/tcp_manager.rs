@@ -56,7 +56,11 @@ impl managed::Manager for TcpManager {
         for attempt in 1..=MAX_CONNECT_ATTEMPTS {
             match timeout(CONNECT_TIMEOUT, TcpStream::connect(socket_addr)).await {
                 Ok(Ok(tcp_stream)) => {
-                    info!(light_addr = %self.addr, "light tcp connection connected");
+                    info!(
+                        light_addr = %self.addr,
+                        "灯控TCP连接成功 light_addr={}",
+                        self.addr
+                    );
                     return Ok(ManagedConnection {
                         addr: self.addr.clone(),
                         tcp_stream,
@@ -71,7 +75,11 @@ impl managed::Manager for TcpManager {
                         attempt,
                         max_attempts = MAX_CONNECT_ATTEMPTS,
                         error = %message,
-                        "light tcp connection failed"
+                        "灯控TCP连接失败 light_addr={} attempt={} max_attempts={} error={}",
+                        self.addr,
+                        attempt,
+                        MAX_CONNECT_ATTEMPTS,
+                        message
                     );
                     last_error = Some(message);
                 }
@@ -80,7 +88,10 @@ impl managed::Manager for TcpManager {
                         light_addr = %self.addr,
                         attempt,
                         max_attempts = MAX_CONNECT_ATTEMPTS,
-                        "light tcp connection timed out"
+                        "灯控TCP连接超时 light_addr={} attempt={} max_attempts={}",
+                        self.addr,
+                        attempt,
+                        MAX_CONNECT_ATTEMPTS
                     );
                     last_error = Some("timeout".to_string());
                 }
@@ -96,7 +107,10 @@ impl managed::Manager for TcpManager {
             light_addr = %self.addr,
             max_attempts = MAX_CONNECT_ATTEMPTS,
             error = %last_error,
-            "light tcp connection failed after retries"
+            "灯控TCP重试后仍连接失败 light_addr={} max_attempts={} error={}",
+            self.addr,
+            MAX_CONNECT_ATTEMPTS,
+            last_error
         );
 
         Err(Error::ConnectFailed(self.addr.clone(), last_error))
@@ -112,7 +126,13 @@ impl managed::Manager for TcpManager {
         } else {
             conn.log_disconnect("unhealthy");
             if let Err(err) = conn.tcp_stream.shutdown().await {
-                error!("关闭tcp连接失败:{} {:?}", self.addr, err);
+                error!(
+                    light_addr = %self.addr,
+                    error = ?err,
+                    "关闭tcp连接失败 light_addr={} error={:?}",
+                    self.addr,
+                    err
+                );
             }
             Err(RecycleError::Message("can't recycle".into()))
         }
@@ -137,7 +157,9 @@ impl ManagedConnection {
             info!(
                 light_addr = %self.addr,
                 reason,
-                "light tcp connection disconnected"
+                "灯控TCP连接已断开 light_addr={} reason={}",
+                self.addr,
+                reason
             );
             self.disconnected_logged = true;
         }

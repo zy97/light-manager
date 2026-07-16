@@ -92,7 +92,17 @@ pub struct LightTimingConfig {
 pub struct AppConfig {
     #[serde(default)]
     pub server: ServerConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
     pub light: LightConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct LoggingConfig {
+    #[serde(default = "default_log_retained_days")]
+    pub retained_days: u64,
+    #[serde(default = "default_log_cleanup_interval_hours")]
+    pub cleanup_interval_hours: u64,
 }
 
 pub fn load_config() -> Result<AppConfig, ConfigError> {
@@ -112,6 +122,23 @@ impl Default for ServerConfig {
 
 fn default_listen_addr() -> String {
     "0.0.0.0:3000".to_string()
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            retained_days: default_log_retained_days(),
+            cleanup_interval_hours: default_log_cleanup_interval_hours(),
+        }
+    }
+}
+
+fn default_log_retained_days() -> u64 {
+    30
+}
+
+fn default_log_cleanup_interval_hours() -> u64 {
+    24
 }
 
 impl LightConfig {
