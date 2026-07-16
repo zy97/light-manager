@@ -5,3 +5,17 @@ listen_addr = "0.0.0.0:3000"
 lights = [
     { address = "127.0.0.1:502", request_ips = ["127.0.0.1", "192.168.70.166"] },
 ]
+
+[light.commands.basic]
+green_light_off = "01 05 00 00 FF 00 8C 3A"
+green_light_on = "01 05 00 00 00 00 CD CA"
+red_light_on = "01 05 00 02 FF 00 2D FA"
+red_light_off = "01 05 00 02 00 00 6C 0A"
+
+[light.commands.composite]
+red = [{ command = "green_light_off" }, { command = "red_light_on" }]
+green = [{ command = "red_light_off" }, { command = "green_light_on" }]
+red_flash = [{ repeat = 5, steps = [{ command = "red_light_on", delay_ms = 500 }, { command = "red_light_off", delay_ms = 200 }] }, { command = "red_light_off" }, { command = "green_light_on" }]
+
+[light.commands.timing]
+io_timeout_ms = 1000

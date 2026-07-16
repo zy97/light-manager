@@ -27,6 +27,65 @@ pub struct Light {
 pub struct LightConfig {
     #[serde(default)]
     pub lights: Vec<Light>,
+    #[serde(default)]
+    pub commands: LightCommandConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct LightCommandConfig {
+    #[serde(default)]
+    pub basic: BasicLightCommandConfig,
+    #[serde(default)]
+    pub composite: CompositeLightCommandConfig,
+    #[serde(default)]
+    pub timing: LightTimingConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct BasicLightCommandConfig {
+    #[serde(default = "default_green_light_off")]
+    pub green_light_off: String,
+    #[serde(default = "default_green_light_on")]
+    pub green_light_on: String,
+    #[serde(default = "default_red_light_on")]
+    pub red_light_on: String,
+    #[serde(default = "default_red_light_off")]
+    pub red_light_off: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CompositeLightCommandConfig {
+    #[serde(default = "default_red_sequence")]
+    pub red: Vec<CompositeItemConfig>,
+    #[serde(default = "default_green_sequence")]
+    pub green: Vec<CompositeItemConfig>,
+    #[serde(default = "default_red_flash_sequence")]
+    pub red_flash: Vec<CompositeItemConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum CompositeItemConfig {
+    Command {
+        command: String,
+    },
+    Repeat {
+        repeat: usize,
+        steps: Vec<CompositeStepConfig>,
+    },
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CompositeStepConfig {
+    pub command: String,
+    #[serde(default)]
+    pub delay_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct LightTimingConfig {
+    #[serde(default = "default_io_timeout_ms")]
+    pub io_timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,9 +130,110 @@ impl LightConfig {
     }
 }
 
+impl Default for LightCommandConfig {
+    fn default() -> Self {
+        Self {
+            basic: BasicLightCommandConfig::default(),
+            composite: CompositeLightCommandConfig::default(),
+            timing: LightTimingConfig::default(),
+        }
+    }
+}
+
+impl Default for BasicLightCommandConfig {
+    fn default() -> Self {
+        Self {
+            green_light_off: default_green_light_off(),
+            green_light_on: default_green_light_on(),
+            red_light_on: default_red_light_on(),
+            red_light_off: default_red_light_off(),
+        }
+    }
+}
+
+impl Default for CompositeLightCommandConfig {
+    fn default() -> Self {
+        Self {
+            red: default_red_sequence(),
+            green: default_green_sequence(),
+            red_flash: default_red_flash_sequence(),
+        }
+    }
+}
+
+impl Default for LightTimingConfig {
+    fn default() -> Self {
+        Self {
+            io_timeout_ms: default_io_timeout_ms(),
+        }
+    }
+}
+
+fn default_green_light_off() -> String {
+    "01 05 00 00 FF 00 8C 3A".to_string()
+}
+
+fn default_green_light_on() -> String {
+    "01 05 00 00 00 00 CD CA".to_string()
+}
+
+fn default_red_light_on() -> String {
+    "01 05 00 02 FF 00 2D FA".to_string()
+}
+
+fn default_red_light_off() -> String {
+    "01 05 00 02 00 00 6C 0A".to_string()
+}
+
+fn default_red_sequence() -> Vec<CompositeItemConfig> {
+    vec![
+        CompositeItemConfig::command("green_light_off"),
+        CompositeItemConfig::command("red_light_on"),
+    ]
+}
+
+fn default_green_sequence() -> Vec<CompositeItemConfig> {
+    vec![
+        CompositeItemConfig::command("red_light_off"),
+        CompositeItemConfig::command("green_light_on"),
+    ]
+}
+
+fn default_red_flash_sequence() -> Vec<CompositeItemConfig> {
+    vec![
+        CompositeItemConfig::Repeat {
+            repeat: 5,
+            steps: vec![
+                CompositeStepConfig {
+                    command: "red_light_on".to_string(),
+                    delay_ms: Some(500),
+                },
+                CompositeStepConfig {
+                    command: "red_light_off".to_string(),
+                    delay_ms: Some(200),
+                },
+            ],
+        },
+        CompositeItemConfig::command("red_light_off"),
+        CompositeItemConfig::command("green_light_on"),
+    ]
+}
+
+fn default_io_timeout_ms() -> u64 {
+    1000
+}
+
+impl CompositeItemConfig {
+    fn command(command: impl Into<String>) -> Self {
+        Self::Command {
+            command: command.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Light, LightConfig};
+    use super::{Light, LightCommandConfig, LightConfig};
 
     #[test]
     fn request_ip_map_is_built_from_each_light() {
@@ -88,6 +248,7 @@ mod tests {
                     request_ips: vec!["192.168.70.166".to_string()],
                 },
             ],
+            commands: LightCommandConfig::default(),
         };
 
         let map = config.request_ip_map();

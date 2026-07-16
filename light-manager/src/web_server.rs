@@ -1,7 +1,7 @@
 use crate::light_runtime::{LightError, LightService, LightStatus};
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, Query, State},
+    extract::{ConnectInfo, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -23,12 +23,6 @@ pub struct ControlLightRequest {
     pub request_ip: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct RedStatusQuery {
-    pub light_ip: Option<String>,
-    pub request_ip: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T>
 where
@@ -37,12 +31,6 @@ where
     pub success: bool,
     pub data: Option<T>,
     pub message: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RedStatusResponse {
-    pub red_on: bool,
-    pub target: LightTarget,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,7 +44,6 @@ pub fn build_router(light_service: Arc<LightService>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/lights/control", post(control_light))
-        .route("/api/lights/red-status", get(red_status))
         .with_state(AppState { light_service })
 }
 
@@ -112,29 +99,6 @@ async fn control_light(
     }))
 }
 
-async fn red_status(
-    State(state): State<AppState>,
-    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
-    Query(query): Query<RedStatusQuery>,
-) -> Result<Json<ApiResponse<RedStatusResponse>>, ApiError> {
-    let target = resolve_target(query.light_ip, query.request_ip, remote_addr);
-    let red_on = match &target {
-        LightTarget::LightIp(light_ip) => state.light_service.red_status(light_ip).await?,
-        LightTarget::RequestIp(request_ip) => {
-            state
-                .light_service
-                .red_status_by_request_ip(request_ip)
-                .await?
-        }
-    };
-
-    Ok(Json(ApiResponse {
-        success: true,
-        data: Some(RedStatusResponse { red_on, target }),
-        message: "ok".to_string(),
-    }))
-}
-
 fn resolve_target(
     light_ip: Option<String>,
     request_ip: Option<String>,
@@ -164,9 +128,10 @@ pub struct ApiError {
 impl From<LightError> for ApiError {
     fn from(error: LightError) -> Self {
         let status = match error {
-            LightError::UnknownRequestIp(_) | LightError::MultipleLightsForRequestIp(_) => {
-                StatusCode::BAD_REQUEST
+            LightError::InvalidCommand(_) | LightError::UnknownCommand(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
             }
+            LightError::UnknownRequestIp(_) => StatusCode::BAD_REQUEST,
             LightError::ConnectionPool(_, _) | LightError::Io(_, _) | LightError::Timeout(_) => {
                 StatusCode::BAD_GATEWAY
             }
