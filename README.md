@@ -114,6 +114,12 @@ curl -X POST http://localhost:3000/api/lights/control \
 curl -fsSL https://raw.githubusercontent.com/zy97/light-manager/main/scripts/install-light-manager.sh | sudo bash
 ```
 
+脚本默认下载 **musl 静态链接** 包,避免旧版 glibc 不兼容。如果确实需要 glibc 动态链接包,可设置 `FORCE_GNU=1`:
+
+```bash
+FORCE_GNU=1 curl -fsSL https://raw.githubusercontent.com/zy97/light-manager/main/scripts/install-light-manager.sh | sudo -E bash
+```
+
 脚本会自动下载最新 Release、注册 systemd 服务并放行 `3000/tcp` 端口。详见 [scripts/install-light-manager.sh](scripts/install-light-manager.sh)。
 
 ## 目录结构

@@ -12,6 +12,11 @@
 #
 # 国内访问 GitHub Release 较慢时,可通过 GH_PROXY 设置代理前缀(末尾带 /):
 #   GH_PROXY="https://ghfast.top/" curl -fsSL .../install-light-manager.sh | sudo -E bash
+#
+# 产物选择:
+#   默认使用 musl 静态链接包,兼容性最好,不依赖系统 glibc 版本。
+#   如需强制使用 gnu/glibc 动态链接包,可设置 FORCE_GNU=1:
+#     FORCE_GNU=1 curl -fsSL .../install-light-manager.sh | sudo -E bash
 
 set -euo pipefail
 
@@ -20,13 +25,19 @@ INSTALL_DIR="/opt/light-manager"
 SERVICE_NAME="light-manager"
 PKG_PREFIX="light-manager"
 
-# 根据系统 libc 自动选择 Release 产物; 可通过 TARGET 环境变量强制覆盖
+# 选择 Release 产物:
+# - 默认使用 musl 静态链接包,避免旧版 glibc 不兼容。
+# - 如需强制使用 gnu/glibc 动态链接包,可设置 FORCE_GNU=1。
+# - 如需强制使用 musl,可设置 FORCE_MUSL=1。
+# - 也可通过 TARGET 环境变量直接指定完整资产文件名。
 if [[ -n "${TARGET:-}" ]]; then
   ASSET="$TARGET"
-elif ldd --version 2>&1 | head -1 | grep -qi musl; then
+elif [[ "${FORCE_GNU:-}" == "1" ]]; then
+  ASSET="light-manager-x86_64-unknown-linux-gnu.tar.xz"
+elif [[ "${FORCE_MUSL:-}" == "1" ]]; then
   ASSET="light-manager-x86_64-unknown-linux-musl.tar.xz"
 else
-  ASSET="light-manager-x86_64-unknown-linux-gnu.tar.xz"
+  ASSET="light-manager-x86_64-unknown-linux-musl.tar.xz"
 fi
 
 GH_PROXY="${GH_PROXY:-}"
@@ -152,6 +163,7 @@ sleep 2
 if systemctl is-active --quiet "$SERVICE_NAME"; then
   echo "安装完成,服务运行中。"
   echo "API 入口: http://<服务器IP>:3000"
+  echo "Scalar 文档: http://<服务器IP>:3000/scalar"
   echo "别忘了编辑 $INSTALL_DIR/config.toml 里的 [light] 灯控配置"
 else
   echo "服务未能启动,请查看日志: journalctl -u $SERVICE_NAME -e" >&2
