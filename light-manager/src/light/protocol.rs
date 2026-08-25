@@ -1,8 +1,9 @@
 use crate::config::{BasicLightCommandConfig, CompositeItemConfig, LightCommandConfig};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use std::{collections::HashMap, time::Duration};
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LightStatus {
     Red,

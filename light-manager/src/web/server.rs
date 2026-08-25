@@ -1,6 +1,10 @@
 use crate::{
     light::{LightError, LightService, LightStatus},
-    web::{api_response::ApiResponse, http_trace::trace_http_request},
+    web::{
+        api_response::{ApiResponse, ApiResponseNull, ApiResponseString},
+        docs,
+        http_trace::trace_http_request,
+    },
 };
 use axum::{
     Json, Router,
@@ -14,13 +18,28 @@ use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, signal};
 use tracing::{error, info};
+use utoipa::{OpenApi, ToSchema};
+use utoipa_scalar::{Scalar, Servable};
+
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "light-manager API", description = "TCP 模式流水线信号灯管理服务"),
+    paths(health, control_light),
+    components(schemas(
+        crate::web::api_response::ApiResponseString,
+        crate::web::api_response::ApiResponseNull,
+        ControlLightRequest,
+        crate::light::LightStatus
+    ))
+)]
+pub struct ApiDoc;
 
 #[derive(Clone)]
 pub struct AppState {
     light_service: Arc<LightService>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ControlLightRequest {
     pub status: LightStatus,
     pub light_ip: Option<String>,
@@ -38,6 +57,8 @@ pub fn build_router(light_service: Arc<LightService>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/lights/control", post(control_light))
+        .route("/openapi.json", get(docs::openapi_json))
+        .merge(Scalar::with_url("/scalar", ApiDoc::openapi()))
         .layer(middleware::from_fn(trace_http_request))
         .with_state(AppState { light_service })
 }
@@ -64,7 +85,12 @@ pub async fn serve(
     Ok(())
 }
 
-async fn health() -> Json<ApiResponse<&'static str>> {
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses((status = 200, description = "服务正常", body = ApiResponseString))
+)]
+pub(crate) async fn health() -> Json<ApiResponse<&'static str>> {
     Json(ApiResponse {
         success: true,
         data: Some("ok"),
@@ -72,7 +98,17 @@ async fn health() -> Json<ApiResponse<&'static str>> {
     })
 }
 
-async fn control_light(
+#[utoipa::path(
+    post,
+    path = "/api/lights/control",
+    request_body = ControlLightRequest,
+    responses(
+        (status = 200, description = "控制成功", body = ApiResponseNull),
+        (status = 400, description = "请求参数错误", body = ApiResponseNull),
+        (status = 502, description = "设备通信失败", body = ApiResponseNull)
+    )
+)]
+pub(crate) async fn control_light(
     State(state): State<AppState>,
     ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     Json(request): Json<ControlLightRequest>,
